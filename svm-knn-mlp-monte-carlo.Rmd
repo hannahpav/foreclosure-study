@@ -1,0 +1,452 @@
+---
+title: "R Notebook"
+output: Classification monte carlo cross validation
+---
+
+#Import 
+```{r}
+library(readxl)
+library(corrplot)
+library(car)
+library(ggplot2)
+library(neuralnet)
+library(caret)
+library(class)
+library(tidyverse)
+library(e1071)
+library(kernlab)
+library(nnet)
+```
+
+Read data:
+```{r}
+d = read_excel('NBFC Loan Transaction Data.xlsx')
+head(d)
+```
+
+#Clean data and remove columns:
+```{r}
+d_clean = d[,-c(1,2,5,6,11,12,19,27,29,30,34,49,50,51,52)]
+d_clean$FORECLOSURE = as.factor(d_clean$FORECLOSURE)
+d_clean = na.omit(d_clean)
+head(d_clean)
+print(length(d_clean$FORECLOSURE))
+```
+```{r}
+d3 = data.frame(d_clean)
+d3_0 <- (d3[(d3$FORECLOSURE==0),])
+d3_1 <- (d3[(d3$FORECLOSURE==1),])
+ 
+## MATCH 0 and 1 data points
+picked1 = sample(seq_len(nrow(d3_0)),size = nrow(d3_1))
+d3_0_picked =d3_0[picked1,]
+d_even <- rbind(d3_0_picked, d3_1)
+rownames(d_even) = seq(length=nrow(d_even))
+d_even_num <- subset(d_even, select = -PRODUCT)
+rownames(d_even_num) = seq(length=nrow(d_even_num))
+
+d3 = data.frame(d_even)
+
+d3$FORECLOSURE = as.factor(d3$FORECLOSURE)
+d4 = subset(d3,select = -FORECLOSURE)
+d4_num = subset(d4,select = -PRODUCT)  
+  
+pca_d4 <- prcomp(t(d4_num), scale = TRUE, center = TRUE)
+
+d_full = data.frame(d3)
+d_full_num = subset(d_full,select = -PRODUCT)
+```
+
+
+```{r}
+### save the TE values for all models in all $B=100$ loops, monte carlo for KNN
+B= 100; ### number of loops
+TEALL = NULL; ### Final TE values
+set.seed(7406); ### You might want to set the seed for randomization
+
+
+n = length(d_full_num$FORECLOSURE)
+n1 = n/5
+
+for (b in 1:B){
+### randomly select 20% of observations as testing data in each loop
+d3 = data.frame(d_clean)
+d3_0 <- (d3[(d3$FORECLOSURE==0),])
+d3_1 <- (d3[(d3$FORECLOSURE==1),])
+ 
+## MATCH 0 and 1 data points
+picked1 = sample(seq_len(nrow(d3_0)),size = nrow(d3_1))
+d3_0_picked =d3_0[picked1,]
+d_even <- rbind(d3_0_picked, d3_1)
+rownames(d_even) = seq(length=nrow(d_even))
+d_even_num <- subset(d_even, select = -PRODUCT)
+rownames(d_even_num) = seq(length=nrow(d_even_num))
+
+d3 = data.frame(d_even)
+
+d3$FORECLOSURE = as.factor(d3$FORECLOSURE)
+d4 = subset(d3,select = -FORECLOSURE)
+d4_num = subset(d4,select = -PRODUCT)  
+  
+pca_d4 <- prcomp(t(d4_num), scale = TRUE, center = TRUE)
+
+d_full = data.frame(d3)
+d_full_num = subset(d_full,select = -PRODUCT)
+
+d_5 = data.frame(pca_d4$rotation[, 1:5],d3$FORECLOSURE)
+names(d_5)[names(d_5) == 'd3.FORECLOSURE'] <- 'FORECLOSURE'
+
+d_10 = data.frame(pca_d4$rotation[, 1:10],d3$FORECLOSURE)
+names(d_10)[names(d_10) == 'd3.FORECLOSURE'] <- 'FORECLOSURE'
+
+d_part = subset(d_full, select = c(PRODUCT, PAID_INTEREST,EMI_DUEAMT,EMI_RECEIVED_AMT,CURRENT_INTEREST_RATE_MIN, FORECLOSURE))
+d_part_num = subset(d_part,select = -PRODUCT)
+
+flag = sort(sample(1:n, n1));
+train_5 = d_5[-flag,]; #Numeric response
+test_5 = d_5[flag,]; #Numeric response
+
+train_10 = d_10[-flag,]; #Factor response
+test_10 = d_10[flag,]; #Factor response
+
+train_full = d_full[-flag,]; #Factor response
+test_full = d_full[flag,]; #Factor response
+
+train_full_num = d_full_num[-flag,]; #Factor response
+test_full_num = d_full_num[flag,]; #Factor response
+
+train_part = d_part[-flag,]; #Factor response
+test_part = d_part[flag,]; #Factor response
+
+train_part_num = d_part_num[-flag,]; #Factor response
+test_part_num = d_part_num[flag,]; #Factor response
+
+
+
+#KNN models/predictions:
+knn_5 = knn(train = train_5[,-6],test = test_5[,-6], cl = as.numeric(train_5[,6]),k = 8)
+knn_10 = knn(train = train_10[,-11],test = test_10[,-11], cl = as.numeric(train_10[,11]),k = 8)
+knn_full = knn(train = train_full_num[,-6],test = test_full_num[,-6], cl = as.numeric(train_full_num[,6]),k = 8)
+knn_part = knn(train = train_part_num[,-5],test = test_part_num[,-5], cl = as.numeric(train_part_num[,5]),k = 8)
+
+
+te1 = sum(as.numeric(as.numeric(test_5$FORECLOSURE) == as.numeric(knn_5)))/length(test_5$FORECLOSURE)
+te2 = sum(as.numeric(as.numeric(test_5$FORECLOSURE) == knn_5)*as.numeric(test_5$FORECLOSURE))/sum(as.numeric(test_5$FORECLOSURE))
+te3 = sum(as.numeric(as.numeric(test_5$FORECLOSURE) == knn_5)*as.numeric(test_5$FORECLOSURE == 0))/sum(as.numeric(test_5$FORECLOSURE==0))
+
+te4 = sum(as.numeric(as.numeric(test_10$FORECLOSURE) == as.numeric(knn_10)))/length(test_10$FORECLOSURE)
+te5 = sum(as.numeric(as.numeric(test_10$FORECLOSURE) == knn_10)*as.numeric(test_10$FORECLOSURE))/sum(as.numeric(test_10$FORECLOSURE))
+te6 = sum(as.numeric(as.numeric(test_10$FORECLOSURE) == knn_10)*as.numeric(test_10$FORECLOSURE == 0))/sum(as.numeric(test_10$FORECLOSURE==0))
+
+te7 = sum(as.numeric(as.numeric(test_full_num$FORECLOSURE) == as.numeric(knn_full)))/length(test_full_num$FORECLOSURE)
+te8 = sum(as.numeric(as.numeric(test_full_num$FORECLOSURE) == as.numeric(knn_full))*as.numeric(test_full_num$FORECLOSURE))/sum(as.numeric(test_full_num$FORECLOSURE))
+te9 = sum(as.numeric(as.numeric(test_full_num$FORECLOSURE) == as.numeric(knn_full))*as.numeric(test_full_num$FORECLOSURE == 0))/sum(as.numeric(test_full_num$FORECLOSURE == 0))
+
+te10 = sum(as.numeric(as.numeric(test_part_num$FORECLOSURE) == as.numeric(knn_part)))/length(test_part_num$FORECLOSURE)
+te11 = sum(as.numeric(as.numeric(test_part_num$FORECLOSURE) == as.numeric(knn_part))*as.numeric(test_part_num$FORECLOSURE))/sum(as.numeric(test_part_num$FORECLOSURE))
+te12 = sum(as.numeric(as.numeric(test_part_num$FORECLOSURE) == as.numeric(knn_part))*as.numeric(test_part_num$FORECLOSURE == 0))/sum(as.numeric(test_part_num$FORECLOSURE == 0))
+
+TEALL = rbind( TEALL, cbind(te1, te2, te3, te4,te5,te6,te7,te8,te9,te10,te11,te12));
+}
+dim(TEALL); ### This should be a Bx7 matrices
+#print(TEALL)
+### if you want, you can change the column name of TEALL
+colnames(TEALL) = c( "knn5 acc","knn5 sens","knn5 spec", "knn10 acc","knn10 sens","knn10 spec","knn full acc","knn full sens","knn full spec","knn part acc", "knn part sens", "knn part spec" );
+## You can report the sample mean and sample variances for the seven models
+apply(TEALL, 2, mean);
+apply(TEALL, 2, var);
+```
+
+```{r}
+### save the TE values for all models in all $B=100$ loops, MLP model
+B= 100; ### number of loops
+TEALL2 = NULL; ### Final TE values
+set.seed(7406); ### You might want to set the seed for randomization
+
+
+n = length(d_full_num$FORECLOSURE)
+n1 = n/5
+
+for (b in 1:B){
+### randomly select 20% of observations as testing data in each loop
+d3 = data.frame(d_clean)
+d3_0 <- (d3[(d3$FORECLOSURE==0),])
+d3_1 <- (d3[(d3$FORECLOSURE==1),])
+ 
+## MATCH 0 and 1 data points
+picked1 = sample(seq_len(nrow(d3_0)),size = nrow(d3_1))
+d3_0_picked =d3_0[picked1,]
+d_even <- rbind(d3_0_picked, d3_1)
+rownames(d_even) = seq(length=nrow(d_even))
+d_even_num <- subset(d_even, select = -PRODUCT)
+rownames(d_even_num) = seq(length=nrow(d_even_num))
+
+d3 = data.frame(d_even)
+
+d3$FORECLOSURE = as.factor(d3$FORECLOSURE)
+d4 = subset(d3,select = -FORECLOSURE)
+d4_num = subset(d4,select = -PRODUCT)  
+  
+pca_d4 <- prcomp(t(d4_num), scale = TRUE, center = TRUE)
+
+d_full = data.frame(d3)
+d_full_num = subset(d_full,select = -PRODUCT)
+
+d_5 = data.frame(pca_d4$rotation[, 1:5],d3$FORECLOSURE)
+names(d_5)[names(d_5) == 'd3.FORECLOSURE'] <- 'FORECLOSURE'
+
+d_10 = data.frame(pca_d4$rotation[, 1:10],d3$FORECLOSURE)
+names(d_10)[names(d_10) == 'd3.FORECLOSURE'] <- 'FORECLOSURE'
+
+d_part = subset(d_full, select = c(PRODUCT, PAID_INTEREST,EMI_DUEAMT,EMI_RECEIVED_AMT,CURRENT_INTEREST_RATE_MIN, FORECLOSURE))
+d_part_num = subset(d_part,select = -PRODUCT)  
+
+flag = sort(sample(1:n, n1));
+train_5 = d_5[-flag,]; #Numeric response
+test_5 = d_5[flag,]; #Numeric response
+
+train_10 = d_10[-flag,]; #Factor response
+test_10 = d_10[flag,]; #Factor response
+
+train_full = d_full[-flag,]; #Factor response
+test_full = d_full[flag,]; #Factor response
+
+train_full_num = d_full_num[-flag,]; #Factor response
+test_full_num = d_full_num[flag,]; #Factor response
+
+train_part = d_part[-flag,]; #Factor response
+test_part = d_part[flag,]; #Factor response
+
+train_part_num = d_part_num[-flag,]; #Factor response
+test_part_num = d_part_num[flag,]; #Factor response
+
+
+#MLP models:
+mlp_5 = nnet(FORECLOSURE~., data = train_5, size = 20, maxiter = 10000)
+mlp_10 = nnet(FORECLOSURE~., data = train_10, size = 20, maxiter = 10000)
+mlp_full = nnet(FORECLOSURE~., data = train_full, size = 20,MaxNWts=84581, maxiter = 10000)
+mlp_part = nnet(FORECLOSURE~., data = train_part, size = 20,MaxNWts=84581, maxiter = 10000)
+
+#MLP predictions:
+ymlp_5 = predict(mlp_5,newdata = test_5, type="class")
+ymlp_10 = predict(mlp_10,newdata = test_10, type="class")
+ymlp_full = predict(mlp_full,newdata = test_full, type="class")
+ymlp_part = predict(mlp_part,newdata = test_part, type="class")
+
+te1 = sum(as.numeric(test_5$FORECLOSURE == ymlp_5))/length(test_5$FORECLOSURE)
+te2 = sum(as.numeric(test_5$FORECLOSURE == ymlp_5)*as.numeric(test_5$FORECLOSURE))/sum(as.numeric(test_5$FORECLOSURE))
+te3 = sum(as.numeric(test_5$FORECLOSURE == ymlp_5)*as.numeric(test_5$FORECLOSURE == 0))/sum(as.numeric(test_5$FORECLOSURE == 0))
+
+te4 = sum(as.numeric(test_10$FORECLOSURE == ymlp_10))/length(test_10$FORECLOSURE)
+te5 = sum(as.numeric(test_10$FORECLOSURE == ymlp_10)*as.numeric(test_10$FORECLOSURE))/sum(as.numeric(test_10$FORECLOSURE))
+te6 = sum(as.numeric(test_10$FORECLOSURE == ymlp_10)*as.numeric(test_10$FORECLOSURE == 0))/sum(as.numeric(test_10$FORECLOSURE))
+
+te7 = sum(as.numeric(test_full$FORECLOSURE == ymlp_full))/length(test_full$FORECLOSURE)
+te8 = sum(as.numeric(test_full$FORECLOSURE == ymlp_full)*as.numeric(test_full$FORECLOSURE))/sum(as.numeric(test_full$FORECLOSURE))
+te9 = sum(as.numeric(test_full$FORECLOSURE == ymlp_full)*as.numeric(test_full$FORECLOSURE == 0))/sum(as.numeric(test_full$FORECLOSURE == 0))
+
+te10 = sum(as.numeric(test_part$FORECLOSURE == ymlp_part))/length(test_part$FORECLOSURE)
+te11 = sum(as.numeric(test_part$FORECLOSURE == ymlp_part)*as.numeric(test_part$FORECLOSURE))/sum(as.numeric(test_part$FORECLOSURE))
+te12 = sum(as.numeric(test_part$FORECLOSURE == ymlp_part)*as.numeric(test_part$FORECLOSURE == 0))/sum(as.numeric(test_part$FORECLOSURE == 0))
+
+TEALL2 = rbind( TEALL2, cbind(te1, te2, te3, te4,te5,te6,te7,te8,te9,te10,te11,te12));
+}
+dim(TEALL2); ### This should be a Bx7 matrices
+#print(TEALL)
+### if you want, you can change the column name of TEALL
+colnames(TEALL2) = c("mlp5 acc", "MLP5 Sens","MLP5 spec", "MLP10 acc", "MLP10 sens","MLP10 spec", "MLP full acc", "MLP full sens","MLP full spec","MLP part acc", "MLP part sens","MLP part spec");
+## You can report the sample mean and sample variances for the seven models
+apply(TEALL2, 2, mean);
+apply(TEALL2, 2, var);
+```
+
+```{r}
+### save the TE values for all models in all $B=100$ loops, svm model
+B= 100; ### number of loops
+TEALL3 = NULL; ### Final TE values
+set.seed(7406); ### You might want to set the seed for randomization
+
+
+n = length(d_full_num$FORECLOSURE)
+n1 = n/5
+
+for (b in 1:B){
+### randomly select 20% of observations as testing data in each loop
+d3 = data.frame(d_clean)
+d3_0 <- (d3[(d3$FORECLOSURE==0),])
+d3_1 <- (d3[(d3$FORECLOSURE==1),])
+ 
+## MATCH 0 and 1 data points
+picked1 = sample(seq_len(nrow(d3_0)),size = nrow(d3_1))
+d3_0_picked =d3_0[picked1,]
+d_even <- rbind(d3_0_picked, d3_1)
+rownames(d_even) = seq(length=nrow(d_even))
+d_even_num <- subset(d_even, select = -PRODUCT)
+rownames(d_even_num) = seq(length=nrow(d_even_num))
+
+d3 = data.frame(d_even)
+
+d3$FORECLOSURE = as.factor(d3$FORECLOSURE)
+d4 = subset(d3,select = -FORECLOSURE)
+d4_num = subset(d4,select = -PRODUCT)  
+  
+pca_d4 <- prcomp(t(d4_num), scale = TRUE, center = TRUE)
+
+d_full = data.frame(d3)
+d_full_num = subset(d_full,select = -PRODUCT)
+
+d_5 = data.frame(pca_d4$rotation[, 1:5],d3$FORECLOSURE)
+names(d_5)[names(d_5) == 'd3.FORECLOSURE'] <- 'FORECLOSURE'
+
+d_10 = data.frame(pca_d4$rotation[, 1:10],d3$FORECLOSURE)
+names(d_10)[names(d_10) == 'd3.FORECLOSURE'] <- 'FORECLOSURE'
+
+d_part = subset(d_full, select = c(PRODUCT, PAID_INTEREST,EMI_DUEAMT,EMI_RECEIVED_AMT,CURRENT_INTEREST_RATE_MIN, FORECLOSURE))
+d_part_num = subset(d_part,select = -PRODUCT)
+  
+flag = sort(sample(1:n, n1));
+train_5 = d_5[-flag,]; #Numeric response
+test_5 = d_5[flag,]; #Numeric response
+
+train_10 = d_10[-flag,]; #Factor response
+test_10 = d_10[flag,]; #Factor response
+
+train_full = d_full[-flag,]; #Factor response
+test_full = d_full[flag,]; #Factor response
+
+train_full_num = d_full_num[-flag,]; #Factor response
+test_full_num = d_full_num[flag,]; #Factor response
+
+train_part = d_part[-flag,]; #Factor response
+test_part = d_part[flag,]; #Factor response
+
+train_part_num = d_part_num[-flag,]; #Factor response
+test_part_num = d_part_num[flag,]; #Factor response
+
+#SVM models:
+svm_5 = svm(FORECLOSURE~., data = train_5,cost =1)
+svm_10 = svm(FORECLOSURE~., data = train_10,cost =10)
+svm_full = svm(FORECLOSURE~., data = train_full,cost =10)
+svm_part = svm(FORECLOSURE~., data = train_part,cost =10)
+
+#SVM predictions:
+ysvm_5 = predict(svm_5, newdata= test_5)
+ysvm_10 = predict(svm_10, newdata= test_10)
+ysvm_full = predict(svm_full, newdata= test_full)
+ysvm_part = predict(svm_part, newdata= test_full)
+
+te1 = sum(as.numeric(test_5$FORECLOSURE == ysvm_5))/length(test_5$FORECLOSURE)
+te2 = sum(as.numeric(test_5$FORECLOSURE == ysvm_5)*as.numeric(test_5$FORECLOSURE))/sum(as.numeric(test_5$FORECLOSURE))
+te3 = sum(as.numeric(test_5$FORECLOSURE == ysvm_5)*as.numeric(test_5$FORECLOSURE == 0))/sum(as.numeric(test_5$FORECLOSURE == 0))
+
+te4 = sum(as.numeric(test_10$FORECLOSURE == ysvm_10))/length(test_10$FORECLOSURE)
+te5 = sum(as.numeric(test_10$FORECLOSURE == ysvm_10)*as.numeric(test_10$FORECLOSURE))/sum(as.numeric(test_10$FORECLOSURE))
+te6 = sum(as.numeric(test_10$FORECLOSURE == ysvm_10)*as.numeric(test_10$FORECLOSURE == 0))/sum(as.numeric(test_10$FORECLOSURE == 0))
+
+te7 = sum(as.numeric(test_full$FORECLOSURE == ysvm_full))/length(test_full$FORECLOSURE)
+te8 = sum(as.numeric(test_full$FORECLOSURE == ysvm_full)*as.numeric(test_full$FORECLOSURE))/sum(as.numeric(test_full$FORECLOSURE))
+te9 = sum(as.numeric(test_full$FORECLOSURE == ysvm_full)*as.numeric(test_full$FORECLOSURE == 0))/sum(as.numeric(test_full$FORECLOSURE == 0))
+
+te10 = sum(as.numeric(test_full$FORECLOSURE == ysvm_part))/length(test_full$FORECLOSURE)
+te11 = sum(as.numeric(test_full$FORECLOSURE == ysvm_part)*as.numeric(test_full$FORECLOSURE))/sum(as.numeric(test_full$FORECLOSURE))
+te12 = sum(as.numeric(test_full$FORECLOSURE == ysvm_part)*as.numeric(test_full$FORECLOSURE == 0))/sum(as.numeric(test_full$FORECLOSURE == 0))
+
+TEALL3 = rbind( TEALL3, cbind(te1, te2, te3, te4,te5,te6,te7,te8,te9,te10,te11,te12));
+}
+dim(TEALL); ### This should be a Bx7 matrices
+#print(TEALL)
+### if you want, you can change the column name of TEALL
+colnames(TEALL3) = c("svm5 acc", "svm5 Sens","svm5 spec", "svm10 acc", "svm10 sens","svm10 spec", "svm full acc", "svm full sens","svm full spec","svm part acc", "svm part sens","svm part spec");
+## You can report the sample mean and sample variances for the seven models
+apply(TEALL3, 2, mean);
+apply(TEALL3, 2, var);
+```
+
+
+
+
+```{r}
+### save the TE values for all models in all $B=100$ loops, svm model
+B= 100; ### number of loops
+TEALL4 = NULL; ### Final TE values
+set.seed(7406); ### You might want to set the seed for randomization
+
+
+n = length(d_full_num$FORECLOSURE)
+n1 = n/5
+
+for (b in 1:B){
+### randomly select 20% of observations as testing data in each loop
+d3 = data.frame(d_clean)
+d3_0 <- (d3[(d3$FORECLOSURE==0),])
+d3_1 <- (d3[(d3$FORECLOSURE==1),])
+ 
+## MATCH 0 and 1 data points
+picked1 = sample(seq_len(nrow(d3_0)),size = nrow(d3_1))
+d3_0_picked =d3_0[picked1,]
+d_even <- rbind(d3_0_picked, d3_1)
+rownames(d_even) = seq(length=nrow(d_even))
+d_even_num <- subset(d_even, select = -PRODUCT)
+rownames(d_even_num) = seq(length=nrow(d_even_num))
+
+d3 = data.frame(d_even)
+
+d3$FORECLOSURE = as.factor(d3$FORECLOSURE)
+d4 = subset(d3,select = -FORECLOSURE)
+d4_num = subset(d4,select = -PRODUCT)  
+  
+pca_d4 <- prcomp(t(d4_num), scale = TRUE, center = TRUE)
+
+d_full = data.frame(d3)
+d_full_num = subset(d_full,select = -PRODUCT)
+
+d_5 = data.frame(pca_d4$rotation[, 1:5],d3$FORECLOSURE)
+names(d_5)[names(d_5) == 'd3.FORECLOSURE'] <- 'FORECLOSURE'
+
+d_10 = data.frame(pca_d4$rotation[, 1:10],d3$FORECLOSURE)
+names(d_10)[names(d_10) == 'd3.FORECLOSURE'] <- 'FORECLOSURE'
+
+d_part = subset(d_full, select = c(PRODUCT, PAID_INTEREST,EMI_DUEAMT,EMI_RECEIVED_AMT,CURRENT_INTEREST_RATE_MIN, FORECLOSURE))
+d_part_num = subset(d_part,select = -PRODUCT)
+  
+flag = sort(sample(1:n, n1));
+train_5 = d_5[-flag,]; #Numeric response
+test_5 = d_5[flag,]; #Numeric response
+
+train_10 = d_10[-flag,]; #Factor response
+test_10 = d_10[flag,]; #Factor response
+
+train_full = d_full[-flag,]; #Factor response
+test_full = d_full[flag,]; #Factor response
+
+train_full_num = d_full_num[-flag,]; #Factor response
+test_full_num = d_full_num[flag,]; #Factor response
+
+train_part = d_part[-flag,]; #Factor response
+test_part = d_part[flag,]; #Factor response
+
+train_part_num = d_part_num[-flag,]; #Factor response
+test_part_num = d_part_num[flag,]; #Factor response
+
+#SVM models:
+
+svm_part = svm(FORECLOSURE~., data = train_part,cost =10)
+
+#SVM predictions:
+
+ysvm_part = predict(svm_part, newdata= test_full)
+
+te10 = sum(as.numeric(test_full$FORECLOSURE == ysvm_part))/length(test_full$FORECLOSURE)
+te11 = sum(as.numeric(test_full$FORECLOSURE == ysvm_part)*as.numeric(test_full$FORECLOSURE))/sum(as.numeric(test_full$FORECLOSURE))
+te12 = sum(as.numeric(test_full$FORECLOSURE == ysvm_part)*as.numeric(test_full$FORECLOSURE == 0))/sum(as.numeric(test_full$FORECLOSURE == 0))
+
+TEALL4 = rbind( TEALL4, cbind(te10,te11,te12));
+}
+dim(TEALL); ### This should be a Bx7 matrices
+#print(TEALL)
+### if you want, you can change the column name of TEALL
+colnames(TEALL3) = c("svm5 acc", "svm5 Sens","svm5 spec", "svm10 acc", "svm10 sens","svm10 spec", "svm full acc", "svm full sens","svm full spec","svm part acc", "svm part sens","svm part spec");
+## You can report the sample mean and sample variances for the seven models
+apply(TEALL4, 2, mean);
+apply(TEALL4, 2, var);
+```

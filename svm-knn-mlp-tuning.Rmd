@@ -1,0 +1,779 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+
+#Import 
+```{r}
+library(readxl)
+library(corrplot)
+library(car)
+library(ggplot2)
+library(neuralnet)
+library(caret)
+library(class)
+library(tidyverse)
+library(e1071)
+library(kernlab)
+library(nnet)
+library(ggplot2)
+library(ggpubr)
+```
+Read data:
+```{r}
+d = read_excel('NBFC Loan Transaction Data.xlsx')
+head(d)
+```
+#Clean data and remove columns:
+```{r}
+d_clean = d[,-c(1,2,5,6,11,12,19,27,29,30,34,49,50,51,52)]
+d_clean$FORECLOSURE = as.factor(d_clean$FORECLOSURE)
+d_clean = na.omit(d_clean)
+head(d_clean)
+print(length(d_clean$FORECLOSURE))
+```
+
+
+```{r}
+d3 = data.frame(d_clean)
+
+d3_0 <- (d3[(d3$FORECLOSURE==0),])
+d3_1 <- (d3[(d3$FORECLOSURE==1),])
+ 
+## MATCH 0 and 1 data points
+picked1 = sample(seq_len(nrow(d3_0)),size = nrow(d3_1))
+d3_0_picked =d3_0[picked1,]
+d_even <- rbind(d3_0_picked, d3_1)
+rownames(d_even) = seq(length=nrow(d_even))
+d_even_num <- subset(d_even, select = -PRODUCT)
+rownames(d_even_num) = seq(length=nrow(d_even_num))
+
+d3 = data.frame(d_even)
+
+length(d3$FORECLOSURE)
+d4 = subset(d3,select = -FORECLOSURE)
+d4_num = subset(d4,select = -PRODUCT)
+head(d4)
+```
+
+```{r}
+pca_d4 <- prcomp(t(d4_num), scale = TRUE, center = TRUE)
+
+d_full = data.frame(d3)
+d_full_num = subset(d_full,select = -PRODUCT)
+
+head(d_full_num)
+
+d_5 = data.frame(pca_d4$rotation[, 1:5],d3$FORECLOSURE)
+names(d_5)[names(d_5) == 'd3.FORECLOSURE'] <- 'FORECLOSURE'
+
+d_10 = data.frame(pca_d4$rotation[, 1:10],d3$FORECLOSURE)
+names(d_10)[names(d_10) == 'd3.FORECLOSURE'] <- 'FORECLOSURE'
+
+#head(d_5)
+#head(d_10)
+
+d_part = subset(d_full, select = c(PRODUCT, PAID_INTEREST,EMI_DUEAMT,EMI_RECEIVED_AMT,CURRENT_INTEREST_RATE_MIN, FORECLOSURE))
+d_part_num = subset(d_part,select = -PRODUCT)
+head(d_part_num)
+```
+
+#Find best hyperparameter for KNN,K
+```{r}
+data = d_5
+p = 0.1
+n = nrow(data)
+accknn5 = numeric(10)
+senknn5 = numeric(10)
+speknn5 = numeric(10)
+nc = 1
+f = 10
+
+predictions <- rep(NA, n)
+actual <- rep(NA, n)
+
+Xp = seq(from=1, to=10,by = 1)
+
+for (p in Xp){
+  cacc = 0
+  csen = 0
+  cspe = 0
+  predictions <- rep(NA, n)
+  actual <- rep(NA, n)
+  
+for (i in seq(from=1, to=n-n/f,by = n/f)) {
+    # Exclude the i-th observation
+    data_subset = data[-(i:(i+n/f)), ]
+    data_subset2 = data[(i:(i+n/f)), ]
+    
+    # Fit gm model
+    knn_model = knn(train = data_subset[,-6],test = data_subset2[,-6], cl = data_subset[,6],k = p)
+    
+    # Make prediction for the excluded observation
+    y_pred <- knn_model
+    
+    # Calculate accuracy and sensitivity
+    cacc = sum(as.numeric(data$FORECLOSURE[i:(i+n/f)] == y_pred)) + cacc
+    csen = sum(as.numeric(data$FORECLOSURE[i:(i+n/f)] == y_pred)*as.numeric(data$FORECLOSURE[i:(i+n/f)]))+csen
+    cspe = sum(as.numeric(data$FORECLOSURE[i:(i+n/f)] == y_pred)*as.numeric(data$FORECLOSURE[i:(i+n/f)] == 0 ))+cspe
+}
+  
+  accknn5[nc] = cacc/n
+  senknn5[nc] = csen/sum(as.numeric(data$FORECLOSURE))
+  speknn5[nc] = cspe/sum(as.numeric(data$FORECLOSURE == 0))
+  nc = nc+1
+}
+
+data = d_10
+p = 0.1
+n = nrow(data)
+accknn10 = numeric(10)
+senknn10 = numeric(10)
+speknn10 = numeric(10)
+nc = 1
+f = 10
+
+predictions <- rep(NA, n)
+actual <- rep(NA, n)
+
+Xp = seq(from=1, to=10,by = 1)
+
+for (p in Xp){
+  cacc = 0
+  csen = 0
+  cspe = 0
+  predictions <- rep(NA, n)
+  actual <- rep(NA, n)
+  
+for (i in seq(from=1, to=n-n/f,by = n/f)) {
+    # Exclude the i-th observation
+    data_subset = data[-(i:(i+n/f)), ]
+    data_subset2 = data[(i:(i+n/f)), ]
+    
+    # Fit gm model
+    knn_model = knn(train = data_subset[,-11],test = data_subset2[,-11], cl = data_subset[,11],k = p)
+    
+    # Make prediction for the excluded observation
+    y_pred <- knn_model
+    
+    # Calculate accuracy and sensitivity
+    cacc = sum(as.numeric(data$FORECLOSURE[i:(i+n/f)] == y_pred)) + cacc
+    csen = sum(as.numeric(data$FORECLOSURE[i:(i+n/f)] == y_pred)*as.numeric(data$FORECLOSURE[i:(i+n/f)]))+csen
+    cspe = sum(as.numeric(data$FORECLOSURE[i:(i+n/f)] == y_pred)*as.numeric(data$FORECLOSURE[i:(i+n/f)] == 0 ))+cspe
+}
+  
+  accknn10[nc] = cacc/n
+  senknn10[nc] = csen/sum(as.numeric(data$FORECLOSURE))
+  speknn10[nc] = cspe/sum(as.numeric(data$FORECLOSURE == 0))
+  nc = nc+1
+}
+
+data = d_full_num
+p = 0.1
+n = nrow(data)
+accknnf = numeric(10)
+senknnf = numeric(10)
+speknnf = numeric(10)
+nc = 1
+f = 10
+
+predictions <- rep(NA, n)
+actual <- rep(NA, n)
+
+Xp = seq(from=1, to=10,by = 1)
+
+for (p in Xp){
+  cacc = 0
+  csen = 0
+  cspe = 0
+  predictions <- rep(NA, n)
+  actual <- rep(NA, n)
+  
+for (i in seq(from=1, to=n-n/f,by = n/f)) {
+    # Exclude the i-th observation
+    data_subset = data[-(i:(i+n/f)), ]
+    data_subset2 = data[(i:(i+n/f)), ]
+    
+    # Fit gm model
+    knn_model = knn(train = data_subset[,-37],test = data_subset2[,-37], cl = data_subset[,37],k = p)
+    
+    # Make prediction for the excluded observation
+    y_pred <- knn_model
+    
+    # Calculate accuracy and sensitivity
+    cacc = sum(as.numeric(data$FORECLOSURE[i:(i+n/f)] == y_pred)) + cacc
+    csen = sum(as.numeric(data$FORECLOSURE[i:(i+n/f)] == y_pred)*as.numeric(data$FORECLOSURE[i:(i+n/f)]))+csen
+    cspe = sum(as.numeric(data$FORECLOSURE[i:(i+n/f)] == y_pred)*as.numeric(data$FORECLOSURE[i:(i+n/f)] == 0 ))+cspe
+}
+  
+  accknnf[nc] = cacc/n
+  senknnf[nc] = csen/sum(as.numeric(data$FORECLOSURE))
+  speknnf[nc] = cspe/sum(as.numeric(data$FORECLOSURE == 0))
+  nc = nc+1
+}
+
+data = d_part_num
+p = 0.1
+n = nrow(data)
+accknnp = numeric(10)
+senknnp = numeric(10)
+speknnp = numeric(10)
+nc = 1
+f = 10
+
+predictions <- rep(NA, n)
+actual <- rep(NA, n)
+
+Xp = seq(from=1, to=10,by = 1)
+
+for (p in Xp){
+  cacc = 0
+  csen = 0
+  cspe = 0
+  predictions <- rep(NA, n)
+  actual <- rep(NA, n)
+  
+for (i in seq(from=1, to=n-n/f,by = n/f)) {
+    # Exclude the i-th observation
+    data_subset = data[-(i:(i+n/f)), ]
+    data_subset2 = data[(i:(i+n/f)), ]
+    
+    # Fit gm model
+    knn_model = knn(train = data_subset[,-5],test = data_subset2[,-5], cl = data_subset[,5],k = p)
+    
+    # Make prediction for the excluded observation
+    y_pred <- knn_model
+    
+    # Calculate accuracy and sensitivity
+    cacc = sum(as.numeric(data$FORECLOSURE[i:(i+n/f)] == y_pred)) + cacc
+    csen = sum(as.numeric(data$FORECLOSURE[i:(i+n/f)] == y_pred)*as.numeric(data$FORECLOSURE[i:(i+n/f)]))+csen
+    cspe = sum(as.numeric(data$FORECLOSURE[i:(i+n/f)] == y_pred)*as.numeric(data$FORECLOSURE[i:(i+n/f)] == 0 ))+cspe
+}
+  
+  accknnp[nc] = cacc/n
+  senknnp[nc] = csen/sum(as.numeric(data$FORECLOSURE))
+  speknnp[nc] = cspe/sum(as.numeric(data$FORECLOSURE == 0))
+  nc = nc+1
+}
+```
+
+
+```{r}
+Xp = seq(from=1, to=10,by = 1)
+
+
+dataknn <- data.frame(x = Xp, y1 = accknnf, y2 = accknn5, y3 = accknn10, y4 = accknnp)
+
+a = ggplot(dataknn, aes(x = x)) +
+  geom_line(aes(y = y1, color = "Full data")) +
+  geom_line(aes(y = y2, color = "5 first principal components")) +
+  geom_line(aes(y = y3, color = "10 first principal components")) +
+  geom_line(aes(y = y4, color = "5 variables from EDA")) +
+  labs(title = "KNN cross validation accuracies", x = "K value", y = "10 fold cross validation accuracy", color = 'Legend') +
+  theme_minimal() +
+  scale_colour_manual(values = c("Full data" = "red", "5 first principal components" = "black", "10 first principal components" = "blue", "5 variables from EDA" = "green"))
+
+dataknn <- data.frame(x = Xp, y1 = senknnf, y2 = senknn5, y3 = senknn10, y4 = senknnp)
+
+b = ggplot(dataknn, aes(x = x)) +
+  geom_line(aes(y = y1, color = "Full data")) +
+  geom_line(aes(y = y2, color = "5 first principal components")) +
+  geom_line(aes(y = y3, color = "10 first principal components")) +
+  geom_line(aes(y = y4, color = "5 variables from EDA")) +
+  labs(title = "KNN cross validation sensitivities", x = "K value", y = "10 fold cross validation accuracy", color = 'Legend') +
+  theme_minimal() +
+  scale_colour_manual(values = c("Full data" = "red", "5 first principal components" = "black", "10 first principal components" = "blue", "5 variables from EDA" = "green"))
+
+dataknn <- data.frame(x = Xp, y1 = speknnf, y2 = speknn5, y3 = speknn10, y4 = speknnp)
+
+c = ggplot(dataknn, aes(x = x)) +
+  geom_line(aes(y = y1, color = "Full data")) +
+  geom_line(aes(y = y2, color = "5 first principal components")) +
+  geom_line(aes(y = y3, color = "10 first principal components")) +
+  geom_line(aes(y = y4, color = "5 variables from EDA")) +
+  labs(title = "KNN cross validation specificities", x = "K value", y = "10 fold cross validation accuracy", color = 'Legend') +
+  theme_minimal() +
+  scale_colour_manual(values = c("Full data" = "red", "5 first principal components" = "black", "10 first principal components" = "blue", "5 variables from EDA" = "green"))
+
+a
+b
+c
+
+
+```
+
+
+```{r}
+sum(as.numeric(data$FORECLOSURE == 0))
+length(data$FORECLOSURE)
+```
+
+
+#Find best hyperparameter for SVM, C
+```{r}
+data = data.frame(d_5)
+data$FORECLOSURE = as.factor(data$FORECLOSURE)
+p = 0.1
+n = nrow(data)
+accknn5 = numeric(10)
+senknn5 = numeric(10)
+speknn5 = numeric(10)
+nc = 1
+f = 10
+
+predictions <- rep(NA, n)
+actual <- rep(NA, n)
+
+Xp = 10^seq(-2, 5, by = 1)  # Example range for C
+
+for (p in Xp){
+  cacc = 0
+  csen = 0
+  cspe = 0
+  predictions <- rep(NA, n)
+  actual <- rep(NA, n)
+  
+for (i in seq(from=1, to=n-n/f,by = n/f)) {
+    # Exclude the i-th observation
+    data_subset = data[-(i:(i+n/f)), ]
+    data_subset2 = data[(i:(i+n/f)), ]
+    
+    # Fit gm model
+    
+    model <- svm(FORECLOSURE~., data = data_subset,cost =p)
+    
+    # Make prediction for the excluded observation
+    y_pred <- predict(model, data_subset2)
+    
+    # Calculate accuracy and sensitivity
+    cacc = sum(as.numeric(data$FORECLOSURE[i:(i+n/f)] == y_pred)) + cacc
+    csen = sum(as.numeric(data$FORECLOSURE[i:(i+n/f)] == y_pred)*as.numeric(data$FORECLOSURE[i:(i+n/f)]))+csen
+    cspe = sum(as.numeric(data$FORECLOSURE[i:(i+n/f)] == y_pred)*as.numeric(data$FORECLOSURE[i:(i+n/f)] == 0 ))+cspe
+}
+  
+  accknn5[nc] = cacc/n
+  senknn5[nc] = csen/sum(as.numeric(data$FORECLOSURE))
+  speknn5[nc] = cspe/sum(as.numeric(data$FORECLOSURE == 0))
+  nc = nc+1
+}
+
+data = data.frame(d_10)
+data$FORECLOSURE = as.factor(data$FORECLOSURE)
+p = 0.1
+n = nrow(data)
+accknn10 = numeric(10)
+senknn10 = numeric(10)
+speknn10 = numeric(10)
+nc = 1
+f = 10
+
+predictions <- rep(NA, n)
+actual <- rep(NA, n)
+
+Xp = 10^seq(-2, 5, by = 1)  # Example range for C
+
+for (p in Xp){
+  cacc = 0
+  csen = 0
+  cspe = 0
+  predictions <- rep(NA, n)
+  actual <- rep(NA, n)
+  
+for (i in seq(from=1, to=n-n/f,by = n/f)) {
+    # Exclude the i-th observation
+    data_subset = data[-(i:(i+n/f)), ]
+    data_subset2 = data[(i:(i+n/f)), ]
+    
+    # Fit gm model
+    
+    model <- svm(FORECLOSURE~., data = data_subset,cost =p)
+    
+    # Make prediction for the excluded observation
+    y_pred <- predict(model, data_subset2)
+    
+    # Calculate accuracy and sensitivity
+    cacc = sum(as.numeric(data$FORECLOSURE[i:(i+n/f)] == y_pred)) + cacc
+    csen = sum(as.numeric(data$FORECLOSURE[i:(i+n/f)] == y_pred)*as.numeric(data$FORECLOSURE[i:(i+n/f)]))+csen
+    cspe = sum(as.numeric(data$FORECLOSURE[i:(i+n/f)] == y_pred)*as.numeric(data$FORECLOSURE[i:(i+n/f)] == 0 ))+cspe
+}
+  
+  accknn10[nc] = cacc/n
+  senknn10[nc] = csen/sum(as.numeric(data$FORECLOSURE))
+  speknn10[nc] = cspe/sum(as.numeric(data$FORECLOSURE == 0))
+  nc = nc+1
+}
+
+
+
+data = data.frame(d_full)
+data$FORECLOSURE = as.factor(data$FORECLOSURE)
+p = 0.1
+n = nrow(data)
+accknnf = numeric(10)
+senknnf = numeric(10)
+speknnf = numeric(10)
+nc = 1
+f = 10
+
+predictions <- rep(NA, n)
+actual <- rep(NA, n)
+
+Xp = 10^seq(-2, 5, by = 1)  # Example range for C
+
+for (p in Xp){
+  cacc = 0
+  csen = 0
+  cspe = 0
+  predictions <- rep(NA, n)
+  actual <- rep(NA, n)
+  
+for (i in seq(from=1, to=n-n/f,by = n/f)) {
+    # Exclude the i-th observation
+    data_subset = data[-(i:(i+n/f)), ]
+    data_subset2 = data[(i:(i+n/f)), ]
+    
+    # Fit gm model
+    
+    model <- svm(FORECLOSURE~., data = data_subset,cost =p)
+    
+    # Make prediction for the excluded observation
+    y_pred <- predict(model, data_subset2)
+    
+    # Calculate accuracy and sensitivity
+    cacc = sum(as.numeric(data$FORECLOSURE[i:(i+n/f)] == y_pred)) + cacc
+    csen = sum(as.numeric(data$FORECLOSURE[i:(i+n/f)] == y_pred)*as.numeric(data$FORECLOSURE[i:(i+n/f)]))+csen
+    cspe = sum(as.numeric(data$FORECLOSURE[i:(i+n/f)] == y_pred)*as.numeric(data$FORECLOSURE[i:(i+n/f)] == 0 ))+cspe
+}
+  
+  accknnf[nc] = cacc/n
+  senknnf[nc] = csen/sum(as.numeric(data$FORECLOSURE))
+  speknnf[nc] = cspe/sum(as.numeric(data$FORECLOSURE == 0))
+  nc = nc+1
+}
+
+data = data.frame(d_part)
+p = 0.1
+n = nrow(data)
+accknnp = numeric(10)
+senknnp = numeric(10)
+speknnp = numeric(10)
+nc = 1
+f = 10
+
+predictions <- rep(NA, n)
+actual <- rep(NA, n)
+
+Xp = 10^seq(-2, 5, by = 1)  # Example range for C
+
+for (p in Xp){
+  cacc = 0
+  csen = 0
+  cspe = 0
+  predictions <- rep(NA, n)
+  actual <- rep(NA, n)
+  
+for (i in seq(from=1, to=n-n/f,by = n/f)) {
+    # Exclude the i-th observation
+    data_subset = data[-(i:(i+n/f)), ]
+    data_subset2 = data[(i:(i+n/f)), ]
+    
+    model <- svm(FORECLOSURE~., data = data_subset,cost =p)
+    
+    # Make prediction for the excluded observation
+    y_pred <- predict(model, data_subset2)
+    
+    # Calculate accuracy and sensitivity
+    cacc = sum(as.numeric(data$FORECLOSURE[i:(i+n/f)] == y_pred)) + cacc
+    csen = sum(as.numeric(data$FORECLOSURE[i:(i+n/f)] == y_pred)*as.numeric(data$FORECLOSURE[i:(i+n/f)]))+csen
+    cspe = sum(as.numeric(data$FORECLOSURE[i:(i+n/f)] == y_pred)*as.numeric(data$FORECLOSURE[i:(i+n/f)] == 0 ))+cspe
+}
+  
+  accknnp[nc] = cacc/n
+  senknnp[nc] = csen/sum(as.numeric(data$FORECLOSURE))
+  speknnp[nc] = cspe/sum(as.numeric(data$FORECLOSURE == 0))
+  nc = nc+1
+}
+
+
+```
+
+```{r}
+Xp = seq(from=-2, to=5,by = 1)
+
+datasvm <- data.frame(x = Xp, y1 = accknnf[1:8], y2 = accknn5[1:8], y3 = accknn10[1:8], y4 = accknnp[1:8])
+
+a = ggplot(datasvm, aes(x = x)) +
+  geom_line(aes(y = y1, color = "Full data")) +
+  geom_line(aes(y = y2, color = "5 first principal components")) +
+  geom_line(aes(y = y3, color = "10 first principal components")) +
+  geom_line(aes(y = y4, color = "5 variables from EDA")) +
+  labs(title = "SVM cross validation accuracies", x = "log10(Cost parameter)", y = "10 fold cross validation accuracy", color = 'Legend') +
+  theme_minimal() +
+  scale_colour_manual(values = c("Full data" = "red", "5 first principal components" = "black", "10 first principal components" = "blue", "5 variables from EDA" = "green"))
+
+datasvm <- data.frame(x = Xp, y1 = senknnf[1:8], y2 = senknn5[1:8], y3 = senknn10[1:8], y4 = senknnp[1:8])
+
+b = ggplot(datasvm, aes(x = x)) +
+  geom_line(aes(y = y1, color = "Full data")) +
+  geom_line(aes(y = y2, color = "5 first principal components")) +
+  geom_line(aes(y = y3, color = "10 first principal components")) +
+  geom_line(aes(y = y4, color = "5 variables from EDA")) +
+  labs(title = "SVM cross validation sensitivities", x = "log10(Cost parameter)", y = "10 fold cross validation accuracy", color = 'Legend') +
+  theme_minimal() +
+  scale_colour_manual(values = c("Full data" = "red", "5 first principal components" = "black", "10 first principal components" = "blue", "5 variables from EDA" = "green"))
+
+datasvm <- data.frame(x = Xp, y1 = speknnf[1:8], y2 = speknn5[1:8], y3 = speknn10[1:8], y4 = speknnp[1:8])
+
+c = ggplot(datasvm, aes(x = x)) +
+  geom_line(aes(y = y1, color = "Full data")) +
+  geom_line(aes(y = y2, color = "5 first principal components")) +
+  geom_line(aes(y = y3, color = "10 first principal components")) +
+  geom_line(aes(y = y4, color = "5 variables from EDA")) +
+  labs(title = "SVM cross validation specificities", x = "log10(Cost parameter)", y = "10 fold cross validation accuracy", color = 'Legend') +
+  theme_minimal() +
+  scale_colour_manual(values = c("Full data" = "red", "5 first principal components" = "black", "10 first principal components" = "blue", "5 variables from EDA" = "green"))
+
+a
+b
+c
+
+```
+
+
+
+#Find best hyperparameter for MLP, size
+```{r}
+data = data.frame(d_5)
+data$FORECLOSURE = as.factor(data$FORECLOSURE)
+p = 0.1
+n = nrow(data)
+accnn5 = numeric(10)
+sennn5 = numeric(10)
+spenn5 = numeric(10)
+nc = 1
+f = 10
+
+predictions <- rep(NA, n)
+actual <- rep(NA, n)
+
+Xp = seq(5, 50, by = 5)  #range for hidden layer size
+
+for (p in Xp){
+  cacc = 0
+  csen = 0
+  cspe = 0
+  predictions <- rep(NA, n)
+  actual <- rep(NA, n)
+  
+for (i in seq(from=1, to=n-n/f,by = n/f)) {
+    # Exclude the i-th observation
+    data_subset = data[-(i:(i+n/f)), ]
+    data_subset2 = data[(i:(i+n/f)), ]
+    
+    # Fit gm model
+    
+    model <- nnet(FORECLOSURE~., data = data_subset, size = p, maxit = 10000)
+    
+    # Make prediction for the excluded observation
+    y_pred <- predict(model, data_subset2, type="class")
+    
+    # Calculate accuracy and sensitivity
+    cacc = sum(as.numeric(data$FORECLOSURE[i:(i+n/f)] == y_pred)) + cacc
+    csen = sum(as.numeric(data$FORECLOSURE[i:(i+n/f)] == y_pred)*as.numeric(data$FORECLOSURE[i:(i+n/f)]))+csen
+    cspe = sum(as.numeric(data$FORECLOSURE[i:(i+n/f)] == y_pred)*as.numeric(data$FORECLOSURE[i:(i+n/f)] == 0 ))+cspe
+}
+  
+  accnn5[nc] = cacc/n
+  sennn5[nc] = csen/sum(as.numeric(data$FORECLOSURE))
+  spenn5[nc] = cspe/sum(as.numeric(data$FORECLOSURE == 0))
+  nc = nc+1
+}
+
+data = data.frame(d_10)
+data$FORECLOSURE = as.factor(data$FORECLOSURE)
+p = 0.1
+n = nrow(data)
+accnn10 = numeric(10)
+sennn10 = numeric(10)
+spenn10 = numeric(10)
+nc = 1
+f = 10
+
+predictions <- rep(NA, n)
+actual <- rep(NA, n)
+
+Xp = seq(5, 50, by = 5)  #range for hidden layer size
+
+for (p in Xp){
+  cacc = 0
+  csen = 0
+  cspe = 0
+  predictions <- rep(NA, n)
+  actual <- rep(NA, n)
+  
+for (i in seq(from=1, to=n-n/f,by = n/f)) {
+    # Exclude the i-th observation
+    data_subset = data[-(i:(i+n/f)), ]
+    data_subset2 = data[(i:(i+n/f)), ]
+    
+    # Fit gm model
+    
+    model <- nnet(FORECLOSURE~., data = data_subset, size = p, maxit = 10000)
+    
+    # Make prediction for the excluded observation
+    y_pred <- predict(model, data_subset2, type="class")
+    
+    # Calculate accuracy and sensitivity
+    cacc = sum(as.numeric(data$FORECLOSURE[i:(i+n/f)] == y_pred)) + cacc
+    csen = sum(as.numeric(data$FORECLOSURE[i:(i+n/f)] == y_pred)*as.numeric(data$FORECLOSURE[i:(i+n/f)]))+csen
+    cspe = sum(as.numeric(data$FORECLOSURE[i:(i+n/f)] == y_pred)*as.numeric(data$FORECLOSURE[i:(i+n/f)] == 0 ))+cspe
+}
+  
+  accnn10[nc] = cacc/n
+  sennn10[nc] = csen/sum(as.numeric(data$FORECLOSURE))
+  spenn10[nc] = cspe/sum(as.numeric(data$FORECLOSURE == 0))
+  nc = nc+1
+}
+
+data = data.frame(d_full)
+data$FORECLOSURE = as.factor(data$FORECLOSURE)
+p = 0.1
+n = nrow(data)
+accnnf = numeric(10)
+sennnf = numeric(10)
+spennf = numeric(10)
+nc = 1
+f = 10
+
+predictions <- rep(NA, n)
+actual <- rep(NA, n)
+
+Xp = seq(5, 50, by = 5)  #range for hidden layer size
+
+for (p in Xp){
+  cacc = 0
+  csen = 0
+  cspe = 0
+  predictions <- rep(NA, n)
+  actual <- rep(NA, n)
+  
+for (i in seq(from=1, to=n-n/f,by = n/f)) {
+    # Exclude the i-th observation
+    data_subset = data[-(i:(i+n/f)), ]
+    data_subset2 = data[(i:(i+n/f)), ]
+    
+    # Fit gm model
+    
+    model <- nnet(FORECLOSURE~., data = data_subset, size = p,MaxNWts=84581, maxit = 10000)
+    
+    # Make prediction for the excluded observation
+    y_pred <- predict(model, data_subset2, type="class")
+    
+    # Calculate accuracy and sensitivity
+    cacc = sum(as.numeric(data$FORECLOSURE[i:(i+n/f)] == y_pred)) + cacc
+    csen = sum(as.numeric(data$FORECLOSURE[i:(i+n/f)] == y_pred)*as.numeric(data$FORECLOSURE[i:(i+n/f)]))+csen
+    cspe = sum(as.numeric(data$FORECLOSURE[i:(i+n/f)] == y_pred)*as.numeric(data$FORECLOSURE[i:(i+n/f)] == 0 ))+cspe
+}
+  
+  accnnf[nc] = cacc/n
+  sennnf[nc] = csen/sum(as.numeric(data$FORECLOSURE))
+  spennf[nc] = cspe/sum(as.numeric(data$FORECLOSURE == 0))
+  nc = nc+1
+}
+
+data = data.frame(d_part)
+p = 0.1
+n = nrow(data)
+accnnp = numeric(10)
+sennnp = numeric(10)
+spennp = numeric(10)
+nc = 1
+f = 10
+
+predictions <- rep(NA, n)
+actual <- rep(NA, n)
+
+Xp = seq(5, 50, by = 5)  #range for hidden layer size
+
+for (p in Xp){
+  cacc = 0
+  csen = 0
+  cspe = 0
+  predictions <- rep(NA, n)
+  actual <- rep(NA, n)
+  
+for (i in seq(from=1, to=n-n/f,by = n/f)) {
+    # Exclude the i-th observation
+    data_subset = data[-(i:(i+n/f)), ]
+    data_subset2 = data[(i:(i+n/f)), ]
+    
+    model <- nnet(FORECLOSURE~., data = data_subset, size = p,MaxNWts=84581, maxit = 10000)
+    
+    # Make prediction for the excluded observation
+    y_pred <- predict(model, data_subset2, type="class")
+    
+    # Calculate accuracy and sensitivity
+    cacc = sum(as.numeric(data$FORECLOSURE[i:(i+n/f)] == y_pred)) + cacc
+    csen = sum(as.numeric(data$FORECLOSURE[i:(i+n/f)] == y_pred)*as.numeric(data$FORECLOSURE[i:(i+n/f)]))+csen
+    cspe = sum(as.numeric(data$FORECLOSURE[i:(i+n/f)] == y_pred)*as.numeric(data$FORECLOSURE[i:(i+n/f)] == 0 ))+cspe
+}
+  
+  accnnp[nc] = cacc/n
+  sennnp[nc] = csen/sum(as.numeric(data$FORECLOSURE))
+  spennp[nc] = cspe/sum(as.numeric(data$FORECLOSURE == 0))
+  nc = nc+1
+}
+
+
+```
+
+
+
+
+```{r}
+Xp = seq(5, 50, by = 5)
+
+datann <- data.frame(x = Xp, y1 = accnnf, y2 = accnn5, y3 = accnn10, y4 = accnnp)
+
+a = ggplot(datann, aes(x = x)) +
+  geom_line(aes(y = y1, color = "Full data")) +
+  geom_line(aes(y = y2, color = "5 first principal components")) +
+  geom_line(aes(y = y3, color = "10 first principal components")) +
+  geom_line(aes(y = y4, color = "5 variables from EDA")) +
+  labs(title = "Neural net cross validation accuracies", x = "Amount of nodes in hidden layer", y = "10 fold cross validation accuracy", color = 'Legend') +
+  theme_minimal() +
+  scale_colour_manual(values = c("Full data" = "red", "5 first principal components" = "black", "10 first principal components" = "blue", "5 variables from EDA" = "green"))
+
+datann <- data.frame(x = Xp, y1 = sennnf, y2 = sennn5, y3 = sennn10, y4 = sennnp)
+
+b = ggplot(datann, aes(x = x)) +
+  geom_line(aes(y = y1, color = "Full data")) +
+  geom_line(aes(y = y2, color = "5 first principal components")) +
+  geom_line(aes(y = y3, color = "10 first principal components")) +
+  geom_line(aes(y = y4, color = "5 variables from EDA")) +
+  labs(title = "Neural net cross validation sensitivities", x = "Amount of nodes in hidden layer", y = "10 fold cross validation accuracy", color = 'Legend') +
+  theme_minimal() +
+  scale_colour_manual(values = c("Full data" = "red", "5 first principal components" = "black", "10 first principal components" = "blue", "5 variables from EDA" = "green"))
+
+datann <- data.frame(x = Xp, y1 = spennf, y2 = spenn5, y3 = spenn10, y4 = spennp)
+
+c = ggplot(datann, aes(x = x)) +
+  geom_line(aes(y = y1, color = "Full data")) +
+  geom_line(aes(y = y2, color = "5 first principal components")) +
+  geom_line(aes(y = y3, color = "10 first principal components")) +
+  geom_line(aes(y = y4, color = "5 variables from EDA")) +
+  labs(title = "Neural net cross validation specificities", x = "Amount of nodes in hidden layer", y = "10 fold cross validation accuracy", color = 'Legend') +
+  theme_minimal() +
+  scale_colour_manual(values = c("Full data" = "red", "5 first principal components" = "black", "10 first principal components" = "blue", "5 variables from EDA" = "green"))
+a
+b
+c
+
+```
+
+
+
+
+

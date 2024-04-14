@@ -1,0 +1,386 @@
+
+## Loading packages
+
+```{r warning=FALSE, include=FALSE}
+library(readxl)
+library(dplyr)
+library(data.table)
+library(xtable)
+library(randomcoloR)
+library(gridExtra)
+library(caret)
+library(rpart.plot)
+library(randomForest)
+library(xgboost)
+library(MASS)
+library(pls)
+library(R.oo)
+library(DiagrammeR)
+library(rsvg)
+
+
+set.seed(31)
+```
+
+## Data Loading and exploration
+
+##Read data:
+```{r}
+d = read_excel('data/NBFC Loan Transaction Data.xlsx')
+head(d)
+```
+
+##Clean data and remove columns:
+```{r}
+d_clean = d[,-c(1,2,5,6,11,12,19,27,29,30,34,49,50,51,52)]
+d_clean$FORECLOSURE = as.factor(d_clean$FORECLOSURE)
+d_clean = na.omit(d_clean)
+head(d_clean)
+print(length(d_clean$FORECLOSURE))
+```
+
+```{r}
+d3 = data.frame(d_clean)
+d3$FORECLOSURE = as.factor(d3$FORECLOSURE)
+d3$PRODUCT = as.factor(d3$PRODUCT)
+d4 = subset(d3,select = -FORECLOSURE)
+d4_num = subset(d4,select = -PRODUCT)
+head(d4)
+pca_d4 <- prcomp(t(d4_num), scale = TRUE, center = TRUE)
+
+d_full = data.frame(d3)
+d_full_num = subset(d_full,select = -PRODUCT)
+head(d_full_num)
+
+d_5 = data.frame(pca_d4$rotation[, 1:5],d3$FORECLOSURE)
+names(d_5)[names(d_5) == 'd3.FORECLOSURE'] <- 'FORECLOSURE'
+
+d_10 = data.frame(pca_d4$rotation[, 1:10],d3$FORECLOSURE)
+names(d_10)[names(d_10) == 'd3.FORECLOSURE'] <- 'FORECLOSURE'
+
+head(d_5)
+head(d_10)
+```
+
+
+## Summary Function
+```{r}
+# Define a summary function for classification evaluation
+mySummary <- function(data, lev = NULL, model = NULL) {
+  # Compute the confusion matrix
+  cm <- caret::confusionMatrix(data[, "pred"], data[, "obs"])
+  
+  # Compute the metrics
+  out <- c(
+    Accuracy = cm$overall["Accuracy"],
+    Kappa = cm$overall["Kappa"],
+    Sensitivity = cm$byClass["Sensitivity"],
+    Specificity = cm$byClass["Specificity"],
+    Pos_Pred_Value = cm$byClass["Pos Pred Value"],
+    Neg_Pred_Value = cm$byClass["Neg Pred Value"],
+    Precision = cm$byClass["Pos Pred Value"],
+    Recall = cm$byClass["Sensitivity"],
+    F1 = 2 * ((cm$byClass["Pos Pred Value"] * cm$byClass["Sensitivity"]) / (cm$byClass["Pos Pred Value"] + cm$byClass["Sensitivity"]))
+  )
+# Compute AUC if the probabilities of the positive class are available
+  if ("Class1" %in% colnames(data)) {
+    roc_obj <- pROC::roc(data$obs, data[["Class1"]])
+    out["AUC"] <- pROC::auc(roc_obj)
+  }
+  out
+}
+
+# Create the train control
+myControl <- trainControl(
+  method = "repeatedcv", 
+  number = 10, 
+  summaryFunction = mySummary, 
+  classProbs = TRUE,  # Set TRUE to get AUC
+  savePredictions = "all"
+)
+
+```
+## XGBoost with FORECLOSURE Hyperparameters https://www.kaggle.com/code/pelkoja/visual-xgboost-tuning-with-caret
+
+```{r}
+d3 = data.frame(d_clean)
+d3$FORECLOSURE = as.factor(d3$FORECLOSURE)
+d3$PRODUCT = as.factor(d3$PRODUCT)
+
+d3_0 <- (d3[(d3$FORECLOSURE==0),])
+d3_1 <- (d3[(d3$FORECLOSURE==1),])
+
+n <- nrow(d3)
+n1 <- nrow(d3_1)
+n0 <- nrow(d3_0)
+
+rf_error <- NULL
+top_var_rf = NULL
+rf_error2 <- NULL
+
+## MATCH 0 and 1 data points
+picked1 = sample(seq_len(nrow(d3_0)),size = nrow(d3_1))
+d3_0_picked =d3_0[picked1,]
+  
+d_even <- rbind(d3_0_picked, d3_1)
+rownames(d_even) = seq(length=nrow(d_even))
+  
+d_even_num <- subset(d_even, select = -PRODUCT)
+rownames(d_even_num) = seq(length=nrow(d_even_num))
+
+input_x <- d_even_num[,-ncol(d_even_num)]
+input_y <- d_even_num$FORECLOSURE
+```
+
+```{r}
+
+depth = seq(4,30,1)
+depth_tune = NULL
+B = 100
+
+for (b in 1:B)
+{
+for (d in depth){
+
+  ## MATCH 0 and 1 data points
+  picked1 = sample(seq_len(nrow(d3_0)),size = nrow(d3_1))
+  d3_0_picked =d3_0[picked1,]
+  
+  d_even <- rbind(d3_0_picked, d3_1)
+  rownames(d_even) = seq(length=nrow(d_even))
+  
+  d_even_num <- subset(d_even, select = -PRODUCT)
+  rownames(d_even_num) = seq(length=nrow(d_even_num))
+  
+  n <- nrow(d_even)
+  n1 <- n/5
+
+  flag <- sort(sample(1:n, n1))
+  fore_train_temp <- d_even[flag, ] # Temp training set for CV
+  fore_test_temp <- d_even[-flag, ] # Temp testing set for CV
+
+  control <- rpart.control(minsplit = 20, minbucket = 7, maxdepth=d)
+  fit <- rpart(FORECLOSURE ~ ., data=fore_train_temp, method="class", control=control)
+
+  pred_dt_tr <- predict(fit, fore_train_temp[,-ncol(fore_train_temp)], type = 'class')
+  pred_dt_te <- predict(fit, fore_test_temp[,-ncol(fore_test_temp)], type = 'class')
+
+  tr_dt_acc <- sum(pred_dt_tr == fore_train_temp$FORECLOSURE)/length(pred_dt_tr)
+  tr_dr_sen <- sum(as.numeric(fore_train_temp$FORECLOSURE == pred_dt_tr)*(as.numeric(fore_train_temp$FORECLOSURE)-1))   /sum(as.numeric(fore_train_temp$FORECLOSURE)-1) #Knn sens
+
+  te_dt_acc <- sum(pred_dt_te == fore_test_temp$FORECLOSURE)/length(pred_dt_te)
+  te_dr_sen <- sum(as.numeric(fore_test_temp$FORECLOSURE == pred_dt_te)*(as.numeric(fore_test_temp$FORECLOSURE)-1))   /sum(as.numeric(fore_test_temp$FORECLOSURE)-1) #Knn sens
+
+  depth_tune = rbind(depth_tune, c(d,tr_dt_acc,tr_dr_sen, te_dt_acc,te_dr_sen ))
+
+}
+  
+}
+
+colnames(depth_tune) = c('maxdepth', 'training.accuracy', 'training.sensitivity', 'testing.accuracy','testing.sensitivity')
+
+df <- data.frame(depth_tune)
+
+depth_metrics = df %>% group_by(maxdepth) %>%
+                   summarise(training.accuracy = mean(training.accuracy), 
+                             training.sensitivity = mean(training.sensitivity), 
+                             testing.accuracy = mean(testing.accuracy), 
+                             testing.sensitivity = mean(testing.sensitivity), 
+                             .groups = 'drop')
+ 
+print(head(depth_metrics))
+xtable(depth_metrics, digits = 4)
+arrange(depth_metrics, desc(testing.sensitivity))
+
+```
+
+```{r}
+
+which.min(depth_metrics$testing.accuracy)
+
+long_depth <- reshape::melt(data.frame(depth_metrics), id = 'maxdepth')
+
+md_plot <- ggplot(long_depth,             
+               aes(x = maxdepth, 
+                   y = value, 
+                   color = variable )) +  geom_line(linewidth=1) + theme_bw() 
+  ggtitle('maxdepth tuning')
+
+md_plot
+```
+
+## TUNING FOR NODE SIZE
+
+```{r}
+
+node = seq(2,10,1)
+node_tune = NULL
+B = 100
+
+for (b in 1:B)
+{
+for (d in node){
+
+  ## MATCH 0 and 1 data points
+  picked1 = sample(seq_len(nrow(d3_0)),size = nrow(d3_1))
+  d3_0_picked =d3_0[picked1,]
+  
+  d_even <- rbind(d3_0_picked, d3_1)
+  rownames(d_even) = seq(length=nrow(d_even))
+  
+  d_even_num <- subset(d_even, select = -PRODUCT)
+  rownames(d_even_num) = seq(length=nrow(d_even_num))
+  
+  n <- nrow(d_even)
+  n1 <- n/5
+
+  flag <- sort(sample(1:n, n1))
+  fore_train_temp <- d_even[flag, ] # Temp training set for CV
+  fore_test_temp <- d_even[-flag, ] # Temp testing set for CV
+
+  control <- rpart.control(minsplit = 20, minbucket = d, maxdepth = 16)
+  fit <- rpart(FORECLOSURE ~ ., data=fore_train_temp, method="class", control=control)
+
+  pred_dt_tr <- predict(fit, fore_train_temp[,-ncol(fore_train_temp)], type = 'class')
+  pred_dt_te <- predict(fit, fore_test_temp[,-ncol(fore_test_temp)], type = 'class')
+
+  tr_dt_acc <- sum(pred_dt_tr == fore_train_temp$FORECLOSURE)/length(pred_dt_tr)
+  tr_dr_sen <- sum(as.numeric(fore_train_temp$FORECLOSURE == pred_dt_tr)*(as.numeric(fore_train_temp$FORECLOSURE)-1))   /sum(as.numeric(fore_train_temp$FORECLOSURE)-1) #Knn sens
+
+  te_dt_acc <- sum(pred_dt_te == fore_test_temp$FORECLOSURE)/length(pred_dt_te)
+  te_dr_sen <- sum(as.numeric(fore_test_temp$FORECLOSURE == pred_dt_te)*(as.numeric(fore_test_temp$FORECLOSURE)-1))   /sum(as.numeric(fore_test_temp$FORECLOSURE)-1) #Knn sens
+
+  node_tune = rbind(node_tune, c(d,tr_dt_acc,tr_dr_sen, te_dt_acc,te_dr_sen ))
+
+}
+  
+}
+
+colnames(node_tune) = c('node.size', 'training.accuracy', 'training.sensitivity', 'testing.accuracy','testing.sensitivity')
+
+df <- data.frame(node_tune)
+
+node_metrics = df %>% group_by(node.size) %>%
+                   summarise(training.accuracy = mean(training.accuracy), 
+                             training.sensitivity = mean(training.sensitivity), 
+                             testing.accuracy = mean(testing.accuracy), 
+                             testing.sensitivity = mean(testing.sensitivity), 
+                             .groups = 'drop')
+ 
+xtable(node_metrics, digits = 4)
+```
+
+```{r}
+long_node <- reshape::melt(data.frame(node_metrics), id = 'node.size')
+
+nd_plot <- ggplot(long_node,             
+               aes(x = node.size, 
+                   y = value, 
+                   color = variable )) +  geom_line(linewidth=1) + theme_bw() 
+  ggtitle('node size tuning')
+
+nd_plot
+```
+
+
+
+## Decision Tree with Monte Carlo
+
+```{r warning=FALSE}
+## caret decision tree
+## involves cross-fold
+
+### save the TE values for all models in all $B=100$ loops
+B= 1000; ### number of loops
+tree_error = NULL; ### Final TE values
+set.seed(7406); ### You might want to set the seed for randomization
+
+
+top_5_dt = NULL
+
+for (b in 1:B){
+  
+  ## MATCH 0 and 1 data points
+  picked1 = sample(seq_len(nrow(d3_0)),size = nrow(d3_1))
+  d3_0_picked =d3_0[picked1,]
+  
+  d_even <- rbind(d3_0_picked, d3_1)
+  rownames(d_even) = seq(length=nrow(d_even))
+  
+  d_even_num <- subset(d_even, select = -PRODUCT)
+  rownames(d_even_num) = seq(length=nrow(d_even_num))
+  
+  n <- nrow(d_even)
+  n1 <- n/5
+
+  flag <- sort(sample(1:n, n1))
+  fore_train_temp <- d_even[flag, ] # Temp training set for CV
+  fore_test_temp <- d_even[-flag, ] # Temp testing set for CV
+  
+  # levels(fore_train_temp$FORECLOSURE) <- c('No', 'Yes')
+  # levels(fore_test_temp$FORECLOSURE) <- c('No', 'Yes')
+  
+  model_dt<- rpart(FORECLOSURE~., data = fore_train_temp, minbucket=7, maxdepth=4, method = 'class')
+  
+  # model_dt <- caret::train(x = fore_train_temp[,-ncol(fore_train_temp)], 
+  #                          y = fore_train_temp$FORECLOSURE,
+  #                method = "rpart", 
+  #                trControl = myControl,
+  #                metric = "Accuracy",
+  #                na.action = na.omit)  # or any other metric you want to optimize
+  # 
+  # # Calculate the average metrics
+  # average_metrics_dt <- colMeans(model_dt$resample[, c("Accuracy.Accuracy", "Pos_Pred_Value.Pos Pred Value", 
+  #                                                      "Recall.Sensitivity", "F1.Pos Pred Value")], na.rm = TRUE)
+  
+  ## Predictions
+  pred_tr_tree = predict(model_dt, fore_train_temp[,-ncol(fore_train_temp)], type = 'class')
+  pred_te_tree = predict(model_dt, fore_test_temp[,-ncol(fore_test_temp)], type = 'class')
+  
+  ## Accuracy
+  tr_tree = sum(pred_tr_tree == fore_train_temp$FORECLOSURE)/length(fore_train_temp$FORECLOSURE)
+  te_tree = sum(pred_te_tree == fore_test_temp$FORECLOSURE)/length(fore_test_temp$FORECLOSURE)
+  
+  ## Sensitivity
+  ser_tree = sum(as.numeric(fore_train_temp$FORECLOSURE == pred_tr_tree)*(as.numeric(fore_train_temp$FORECLOSURE)-1) / sum(as.numeric(fore_train_temp$FORECLOSURE)-1))
+  see_tree = sum(as.numeric(fore_test_temp$FORECLOSURE == pred_te_tree)*(as.numeric(fore_test_temp$FORECLOSURE)-1) / sum(as.numeric(fore_test_temp$FORECLOSURE)-1))
+  
+  ## Calculate Top Words
+  words <- data.frame(varImp(model_dt)[1])
+  words <- cbind('variable' = rownames(words), words)
+
+  top_5_dt = append(top_5_dt, rownames(words[order(words$Overall, decreasing = TRUE),][1:5,]))
+  
+  tree_error = rbind(tree_error, c(tr_tree, te_tree, ser_tree, see_tree))
+}
+
+colnames(tree_error) = c('Training Accuracy', 'Testing Accuracy', 'Training Sensitivity', 'Testing Sensitivity')
+
+mean_dt <- round(apply(tree_error, 2, mean),5)
+var_dt <- round(apply(tree_error, 2, var),5)
+CI_dt <- round(1.96 * (mean_dt/sqrt(var)),5)
+
+frame <- rbind(mean_dt, var_dt, CI_dt)
+print(frame)
+
+words1 <- (table(unlist(top_5_dt)))
+sorted_words <- words1[order(words1, decreasing =TRUE)]
+print(sorted_words)
+xtable(sorted_words)
+
+xtable(frame,digits=4)
+
+## printed tree
+tree_example <- prp(model_dt, type=1,faclen=1, extra=1, digits=5, box.palette=c("Greens"))
+
+```
+
+```{r}
+## SAVE THE OUTPUTS
+top_words_dt <- sorted_words
+metrics_dt <- frame
+one_tree <- tree_example
+xtable(frame)
+
+```
+

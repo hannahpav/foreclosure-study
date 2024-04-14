@@ -1,0 +1,190 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+In this markdown the exploratory data analysis on the file regarding foreclosure rates in India is performed.
+
+Import packages:
+```{r}
+library(readxl)
+library(corrplot)
+library(car)
+library(ggplot2)
+```
+
+
+Read data:
+```{r}
+d = read_excel('NBFC Loan Transaction Data.xlsx')
+head(d)
+```
+
+Calculate amount of foreclosure data points:
+```{r}
+af =sum(d$FORECLOSURE) #Amount of foreclosures in the dataset
+pf = af/length(d$FORECLOSURE) #Percentage of foreclosures in the dataset
+print(af)
+print(pf)
+print(length(d$FORECLOSURE))
+```
+
+
+#Clean data and remove columns:
+```{r}
+d_clean = d[,-c(1,2,5,6,11,12,19,27,29,30,34,49,50,51,52)]
+d_clean$FORECLOSURE = as.factor(d_clean$FORECLOSURE)
+d_clean = na.omit(d_clean)
+head(d_clean)
+print(length(d_clean$FORECLOSURE))
+```
+
+```{r}
+#boxplot(NET_RECEIVABLE~FORECLOSURE, data = d, main = 'Net receivable per foreclosure category')
+#boxplot(BALANCE_TENURE~FORECLOSURE, data = d, main = 'Balance tenure per foreclosure category')
+#boxplot(ORIGNAL_INTEREST_RATE~FORECLOSURE, data = d)
+#boxplot(ORIGNAL_TENOR~FORECLOSURE, data = d)
+#boxplot(BALANCE_EXCESS~FORECLOSURE, data = d)
+#boxplot(COMPLETED_TENURE~FORECLOSURE, data = d, main = 'Balance tenure per foreclosure category')
+
+#boxplot(CURRENT_INTEREST_RATE_MIN ~FORECLOSURE,data = d, main='Current interest rate min')
+
+#par(mfrow=c(3,2))
+boxplot(FORECLOSURE~PRODUCT,data = d)
+boxplot(PAID_INTEREST~FORECLOSURE,data = d)
+boxplot(EMI_DUEAMT ~FORECLOSURE,data = d)
+boxplot(EMI_RECEIVED_AMT ~FORECLOSURE,data = d)
+boxplot(CURRENT_INTEREST_RATE_MIN ~FORECLOSURE,data = d)
+
+#par(mfrow=c(3,2))
+#boxplot(FORECLOSURE~PRODUCT,data = d)
+#boxplot(PAID_INTEREST~FORECLOSURE,data = d)
+#boxplot(EMI_DUEAMT ~FORECLOSURE,data = d)
+#boxplot(EMI_RECEIVED_AMT ~FORECLOSURE,data = d)
+#boxplot(CURRENT_INTEREST_RATE_MIN ~FORECLOSURE,data = d)
+
+#par(mfrow=c(3,2))
+#boxplot(FORECLOSURE~PRODUCT,data = d, main='Product category',ylab="")
+#boxplot(PAID_INTEREST~FORECLOSURE,data = d, main='PAID interest',ylab="")
+#boxplot(EMI_DUEAMT ~FORECLOSURE,data = d, main='EMI due amount',ylab="")
+#boxplot(EMI_RECEIVED_AMT ~FORECLOSURE,data = d, main='EMI received amount',ylab="")
+#boxplot(CURRENT_INTEREST_RATE_MIN ~FORECLOSURE,data = d, main='Current interest rate min',ylab="")
+```
+```{r}
+d_t = d[(d$PRODUCT == 'HL'),]
+fs = sum(d_t$FORECLOSURE)
+lf = length(d_t$FORECLOSURE)
+fs/lf
+```
+
+
+
+Try to find correlation between date and foreclosure rate:
+```{r}
+year = format(as.Date(d$AUTHORIZATIONDATE, format="%d/%m/%Y"),"%Y")
+t = aggregate(d$FORECLOSURE, list(year), mean)
+t
+```
+Create dataframe for correlation matrix:
+```{r}
+d2 = data.frame(d)
+d2$AUTHORIZATIONDATE = as.numeric(format(as.Date(d$AUTHORIZATIONDATE, format="%d/%m/%Y"),"%Y"))
+d2$INTEREST_START_DATE = as.numeric(format(as.Date(d$INTEREST_START_DATE, format="%d/%m/%Y"),"%Y"))
+d2$LAST_RECEIPT_DATE = as.numeric(format(as.Date(d$LAST_RECEIPT_DATE, format="%d/%m/%Y"),"%Y"))
+d2$PRODUCT = as.numeric(unclass(as.factor(d2$PRODUCT)))
+d2 = d2[-c(1,5,12,50,51)]
+head(d2)
+```
+
+Create correlation matrix:
+```{r}
+par(mar = c(1, 1, 1, 1))  # Set margin to adjust the size
+cor_matrix = cor(x = d2, use = "complete.obs")  #Define the correlation matrix
+corrplot(cor_matrix, method = 'number',number.cex= 8/ncol(d2), tl.cex = 0.5,tl.col = "black") # colorful number
+```
+
+```{r}
+d4 = data.frame(d2)
+colnames(d4) = seq(1:48)
+```
+
+Create correlation matrix:
+```{r}
+par(mar = c(1, 1, 1, 1))  # Set margin to adjust the size
+cor_matrix = cor(x = d4, use = "complete.obs")  #Define the correlation matrix
+corrplot(cor_matrix, method = 'color',number.cex= 8/ncol(d4), tl.cex = 0.5,tl.col = "black") # colorful number
+```
+
+
+```{r}
+d3 = na.omit(d2)
+length(d3$FORECLOSURE)
+```
+
+
+```{r}
+model <- lm(FORECLOSURE ~ ., data = d3)
+alias_info <- alias(model)
+print(alias_info)
+```
+
+```{r}
+cor_matrix = cor(x = d3)  #Define the correlation matrix
+print(cor_matrix)
+```
+
+```{r}
+pairs(d3[, 1:6])  # Selecting the first six variables as an example
+head(d3)
+```
+
+```{r}
+# Perform PCA
+pca_result <- prcomp(d3, scale. = TRUE)
+
+# Scree plot
+plot(1:length(pca_result$sdev), pca_result$sdev^2 / sum(pca_result$sdev^2),
+     type = 'b', pch = 19, xlab = 'Principal Component', ylab = 'Proportion of Variance Explained',
+     main = 'Explained variance per principal component', ylim = c(0, 1))
+
+# Add cumulative variance explained
+lines(1:length(pca_result$sdev), cumsum(pca_result$sdev^2) / sum(pca_result$sdev^2),
+      type = 'b', pch = 19, col = 'red')
+
+# Legend
+legend('topleft', legend = c('Individual', 'Cumulative'), col = c('black', 'red'), pch = 19)
+```
+
+
+```{r}
+d5 = data.frame(d_clean)
+head(d5)
+d5 = subset(d5, select = -PRODUCT)
+d5$FORECLOSURE = as.numeric(d5$FORECLOSURE)
+colnames(d5) = seq(1:37)
+head(d5)
+```
+
+Create correlation matrix:
+```{r}
+par(mar = c(1, 1, 1, 1))  # Set margin to adjust the size
+cor_matrix = cor(x = d5, use = "complete.obs")  #Define the correlation matrix
+corrplot(cor_matrix, method = 'color',number.cex= 9/ncol(d5), tl.cex = 0.5,tl.col = "black") # colorful number
+```
+```{r}
+# Perform PCA
+pca_result <- prcomp(d5, scale. = TRUE)
+
+# Scree plot
+plot(1:length(pca_result$sdev), pca_result$sdev^2 / sum(pca_result$sdev^2),
+     type = 'b', pch = 19, xlab = 'Principal Component', ylab = 'Proportion of Variance Explained',
+     main = 'Explained variance per principal component', ylim = c(0, 1))
+
+# Add cumulative variance explained
+lines(1:length(pca_result$sdev), cumsum(pca_result$sdev^2) / sum(pca_result$sdev^2),
+      type = 'b', pch = 19, col = 'red')
+
+# Legend
+legend('topleft', legend = c('Individual', 'Cumulative'), col = c('black', 'red'), pch = 19)
+```
+

@@ -1,0 +1,257 @@
+---
+title: "3 Loan Models"
+author: "HP"
+date: "2024-01-31"
+output: html_document
+---
+### Loading packages
+
+```{r warning=FALSE, include=FALSE}
+library(readxl)
+library(dplyr)
+library(data.table)
+library(xtable)
+library(randomcoloR)
+library(gridExtra)
+library(caret)
+library(rpart.plot)
+library(randomForest)
+library(xgboost)
+library(MASS)
+library(pls)
+library(R.oo)
+library(DiagrammeR)
+library(rsvg)
+
+
+set.seed(31)
+```
+
+### Data Loading and exploration
+
+#Read data:
+```{r}
+d = read_excel('data/NBFC Loan Transaction Data.xlsx')
+head(d)
+```
+
+#Clean data and remove columns:
+```{r}
+d_clean = d[,-c(1,2,5,6,11,12,19,27,29,30,34,49,50,51,52)]
+d_clean$FORECLOSURE = as.factor(d_clean$FORECLOSURE)
+d_clean = na.omit(d_clean)
+head(d_clean)
+print(length(d_clean$FORECLOSURE))
+```
+
+```{r}
+d3 = data.frame(d_clean)
+d3$FORECLOSURE = as.factor(d3$FORECLOSURE)
+d3$PRODUCT = as.factor(d3$PRODUCT)
+d4 = subset(d3,select = -FORECLOSURE)
+d4_num = subset(d4,select = -PRODUCT)
+head(d4)
+pca_d4 <- prcomp(t(d4_num), scale = TRUE, center = TRUE)
+
+d_full = data.frame(d3)
+d_full_num = subset(d_full,select = -PRODUCT)
+head(d_full_num)
+
+d_5 = data.frame(pca_d4$rotation[, 1:5],d3$FORECLOSURE)
+names(d_5)[names(d_5) == 'd3.FORECLOSURE'] <- 'FORECLOSURE'
+
+d_10 = data.frame(pca_d4$rotation[, 1:10],d3$FORECLOSURE)
+names(d_10)[names(d_10) == 'd3.FORECLOSURE'] <- 'FORECLOSURE'
+
+# head(d_5)
+# head(d_10)
+```
+
+
+### Random Forest with Monte Carlo
+
+```{r warning=FALSE}
+## caret decision tree  
+## involves cross-fold
+
+### save the TE values for all models in all $B=100$ loops
+B= 100; ### number of loops
+set.seed(7406); ### You might want to set the seed for randomization
+
+d3_0 <- (d3[(d3$FORECLOSURE==0),])
+d3_1 <- (d3[(d3$FORECLOSURE==1),])
+
+n <- nrow(d3)
+n1 <- nrow(d3_1)
+n0 <- nrow(d3_0)
+
+rf_error <- NULL
+top_var_rf = NULL
+rf_error2 <- NULL
+
+for (b in 1:B){
+
+  ## MATCH 0 and 1 data points
+  picked1 = sample(seq_len(nrow(d3_0)),size = nrow(d3_1))
+  d3_0_picked =d3_0[picked1,]
+  
+  d_even <- rbind(d3_0_picked, d3_1)
+  rownames(d_even) = seq(length=nrow(d_even))
+  
+  d_even_num <- subset(d_even, select = -PRODUCT)
+  rownames(d_even_num) = seq(length=nrow(d_even_num))
+  
+  levels(d_even_num$FORECLOSURE) <- c('No', 'Yes')
+  levels(d_even_num$FORECLOSURE) <- c('No', 'Yes')
+  
+  n <- nrow(d_even)
+  n1 <- n/5
+  
+  flag <- sort(sample(1:n, n1))
+  fore_train_temp <- d_even_num[flag, ] # Temp training set for CV
+  fore_test_temp <- d_even_num[-flag, ] # Temp testing set for CV
+  
+
+  
+  model_rf <- caret::train(FORECLOSURE ~ ., 
+               data = fore_train_temp, 
+               method = "rf", 
+               trControl = myControl,
+               metric = "Accuracy",
+               )  # or any other metric you want to optimize
+  
+  # Calculate the average metrics
+  average_metrics_rf <- colMeans(model_rf$resample[, c("Accuracy.Accuracy", 
+               "Recall.Sensitivity")], na.rm = TRUE)
+  
+  ## Predictions
+  pred_tr_rf = predict(model_rf, fore_train_temp)
+  pred_te_rf = predict(model_rf, fore_test_temp)
+
+
+  ## Accuracy
+  tr_tree_rf = sum(pred_tr_rf == fore_train_temp$FORECLOSURE)/length(fore_train_temp$FORECLOSURE)
+  te_tree_rf = sum(pred_te_rf == fore_test_temp$FORECLOSURE)/length(fore_test_temp$FORECLOSURE)
+
+  ## Sensitivity
+  ser_tree_rf = sensitivity(pred_tr_rf, fore_train_temp$FORECLOSURE)
+  see_tree_rf = sensitivity(pred_te_rf, fore_train_temp$FORECLOSURE)
+  
+  # Most important Variables
+  best_rf <- model_rf$finalModel
+
+  top_var_rf <- rbind(transpose(data.frame(importance(best_rf, type=2))))
+  
+  rf_error2 = rbind(rf_error2, c(average_metrics_rf[1], average_metrics_rf[2]))
+  rf_error = rbind(rf_error, c(tr_tree_rf, te_tree_rf, ser_tree_rf, see_tree_rf))
+}
+
+
+
+```
+
+
+```{r}
+colnames(rf_error2) = c('Testing Accuracy', 'Testing Sensitivity')
+
+mean_rf <- round(apply(rf_error2, 2, mean),5)
+var_rf <- round(apply(rf_error2, 2, var),5)
+CI_rf <- round(1.96 * (mean_rf/sqrt(var_rf)),5)
+
+frame_rf <- rbind(mean_rf, var_rf, CI_rf)
+print(frame_rf)
+xtable(frame_rf, digits = 5)
+
+colnames(top_var_rf) <- rownames(importance(best_rf, type=2))
+word_mean <-round(apply(top_var_rf,2,mean),5)
+word_mean <- word_mean[order(word_mean, decreasing = TRUE)]
+#xtable(data.frame('freq' = word_mean[1:10]))
+
+par(mar=c(4,4,4,8))
+dotchart((word_mean[order(word_mean)]), cex=.4, main = 'MeanDecreaseGini')
+
+# words1 <- (table(unlist(top_5_dt)))
+# sorted_words <- words1[order(words1, decreasing =TRUE)]
+# print(sorted_words)
+#xtable(sorted_words)
+
+#xtable(frame,digits=4)
+
+## printed tree
+prp(model_rf$finalModel, type=1,faclen=1, extra=1, digits=5, box.palette=c("Greens"))
+```
+
+
+### Random Forest with Monte Carlo
+
+```{r warning=FALSE}
+## caret decision tree
+## involves cross-fold
+
+### save the TE values for all models in all $B=100$ loops
+B= 100; ### number of loops
+set.seed(7406); ### You might want to set the seed for randomization
+
+d3_0 <- (d3[(d3$FORECLOSURE==0),])
+d3_1 <- (d3[(d3$FORECLOSURE==1),])
+
+n <- nrow(d3)
+n1 <- nrow(d3_1)
+n0 <- nrow(d3_0)
+
+rf_error <- NULL
+top_var_rf = NULL
+rf_error2 <- NULL
+
+for (b in 1:B){
+
+  ## MATCH 0 and 1 data points
+  picked1 = sample(seq_len(nrow(d3_0)),size = nrow(d3_1))
+  d3_0_picked =d3_0[picked1,]
+  
+  d_even <- rbind(d3_0_picked, d3_1)
+  rownames(d_even) = seq(length=nrow(d_even))
+  
+  d_even_num <- subset(d_even, select = -PRODUCT)
+  rownames(d_even_num) = seq(length=nrow(d_even_num))
+  
+  levels(d_even_num$FORECLOSURE) <- c('No', 'Yes')
+  levels(d_even_num$FORECLOSURE) <- c('No', 'Yes')
+  
+  n <- nrow(d_even)
+  n1 <- n/5
+  
+  flag <- sort(sample(1:n, n1))
+  fore_train_temp <- d_even_num[flag, ] # Temp training set for CV
+  fore_test_temp <- d_even_num[-flag, ] # Temp testing set for CV
+  
+  model_rf <- caret::train(FORECLOSURE ~ ., 
+               data = d_even_num, 
+               method = "rf", 
+               trControl = myControl,
+               metric = "Accuracy",
+               )  # or any other metric you want to optimize
+  
+  ## Predictions
+  pred_tr_rf = predict(model_rf, fore_train_temp)
+  pred_te_rf = predict(model_rf, fore_test_temp)
+
+  ## Accuracy
+  tr_tree_rf = sum(pred_tr_rf == fore_train_temp$FORECLOSURE)/length(fore_train_temp$FORECLOSURE)
+  te_tree_rf = sum(pred_te_rf == fore_test_temp$FORECLOSURE)/length(fore_test_temp$FORECLOSURE)
+
+  ## Sensitivity
+  ser_tree_rf = sensitivity(pred_tr_rf, fore_train_temp$FORECLOSURE)
+  see_tree_rf = sensitivity(pred_te_rf, fore_train_temp$FORECLOSURE)
+  
+  # Most important Variables
+  best_rf <- model_rf$finalModel
+
+  top_var_rf <- rbind(transpose(data.frame(importance(best_rf, type=2))))
+  
+  rf_error = rbind(rf_error, c(tr_tree_rf, te_tree_rf, ser_tree_rf, see_tree_rf))
+}
+
+
+
+```
