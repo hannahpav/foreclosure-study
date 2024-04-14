@@ -19,12 +19,12 @@ The main research questions therefore are:
 
 To answer these questions the 'Foreclosure Prediction of Financial Dataset' was used \cite{Kaggle}. To increase interpretability variable selection is performed to determine which variables are the most impactful. A multitude of classification models where fitted to determine the right trade-off between complexity and interpretability, the models fitted are:
 
-1. Decision-trees
-2. Random-Forest
-3. Boosted Trees
-4. Logistic Regression
-5. K-nearest neighbours
-6. Neural networks
-7. Support vector machines
+1. [Decision-trees](https://github.com/hannahpav/foreclosure-study/blob/main/decision-tree.Rmd)
+2. [Random-Forest](https://github.com/hannahpav/foreclosure-study/blob/main/random-forest.Rmd)
+3. [Boosted Trees](https://github.com/hannahpav/foreclosure-study/blob/main/xbgboost.Rmd)
+4. [Logistic Regression](https://github.com/hannahpav/foreclosure-study/blob/main/logR-models.Rmd)
+5. [K-nearest neighbours](https://github.com/hannahpav/foreclosure-study/blob/main/svm-knn-mlp-monte-carlo.Rmd)
+6. [Neural networks](https://github.com/hannahpav/foreclosure-study/blob/main/svm-knn-mlp-monte-carlo.Rmd)
+7. [Support vector machines](https://github.com/hannahpav/foreclosure-study/blob/main/svm-knn-mlp-monte-carlo.Rmd)
    
 Furthermore, principal component analysis is performed to see if this would increase the accuracy or sensitivity of the model. Generally, the model's quality is determined by its sensitivity because the impact of going to foreclosure outweighs the risk of a false positive. It is less trouble to do some additional research based on the model compared to not perceiving a loan as risky and then going to foreclosure.
